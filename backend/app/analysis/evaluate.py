@@ -10,7 +10,7 @@ from typing import Any
 
 import phonenumbers
 
-from ..categories import get_category
+from ..categories import HIGH_VALUE, get_category
 from .website import classify_url, normalize_url, social_network_of
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
@@ -238,6 +238,11 @@ def evaluate(b: dict, wa: dict | None, scoring: dict, region_code: str | None = 
         score("website_improvable", "Сайт можна покращити")
     if "incomplete_info" in problems:
         score("incomplete_info", "Неповна інформація")
+    if b.get("category") in HIGH_VALUE:
+        score("high_value_niche", "Ніша з високим чеком")
+    rating, reviews = b.get("rating"), b.get("reviews_count")
+    if rating is not None and reviews is not None and rating >= 4.0 and reviews >= 30:
+        score("popular_business", f"Популярний бізнес ({rating}★, {reviews} відгуків)")
     if contact_verified:
         score("has_contact", "Є доступний телефон або email")
     total = max(0, min(100, sum(x["points"] for x in breakdown)))

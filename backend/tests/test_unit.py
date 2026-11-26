@@ -72,3 +72,24 @@ def test_html_detection():
     codes = {s["code"] for s in res["outdated_signals"]}
     assert {"old_cms", "old_jquery", "no_https", "no_viewport", "old_copyright"} <= codes
     assert res["is_outdated"]
+
+
+def test_detect_chains():
+    from app.services.jobs import detect_chains
+    from app.sources.base import RawBusiness
+
+    def rb(i, name, lat, lon, brand=None):
+        return RawBusiness(source="osm", source_id=str(i), name=name, lat=lat, lon=lon, brand=brand)
+
+    cands = [rb(1, "Челентано", 49.84, 24.03), rb(2, "Челентано", 49.86, 24.06),  # дві точки — мережа
+             rb(3, "Кафе Мрія", 49.84, 24.03), rb(4, "Кафе Мрія", 49.8401, 24.0301),  # дубль однієї точки — не мережа
+             rb(5, "Сільпо", 49.8, 24.0, brand="Сільпо")]
+    assert detect_chains(cands) == {normalize_name("Челентано"), normalize_name("Сільпо")}
+
+
+def test_high_value_and_popular_points():
+    b = {"name": "Посмішка", "category": "dentist", "phone": "+380671112233", "rating": 4.7, "reviews_count": 120,
+         "address": "x", "opening_hours": "Mo-Fr"}
+    ev = evaluate(b, None, SC)
+    keys = {x["key"] for x in ev["score_breakdown"]}
+    assert {"high_value_niche", "popular_business", "has_contact", "no_website", "no_booking"} <= keys

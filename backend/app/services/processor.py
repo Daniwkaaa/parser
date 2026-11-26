@@ -19,7 +19,7 @@ def business_to_eval_dict(biz: Business) -> dict:
     return {
         "name": biz.name, "category": biz.category, "address": biz.address, "phone": biz.phone, "email": biz.email,
         "website": biz.website, "instagram": biz.instagram, "facebook": biz.facebook, "socials": dict(biz.socials or {}),
-        "opening_hours": biz.opening_hours, "menu_url": (biz.source_tags or {}).get("_menu_url"),
+        "opening_hours": biz.opening_hours, "rating": biz.rating, "reviews_count": biz.reviews_count, "menu_url": (biz.source_tags or {}).get("_menu_url"),
     }
 
 

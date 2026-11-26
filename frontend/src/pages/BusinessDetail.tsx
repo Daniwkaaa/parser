@@ -198,6 +198,21 @@ export default function BusinessDetail() {
           )}
 
           <section className="card card-pad">
+            <div className="mb-1 text-sm font-medium text-zinc-200">Знайти більше вручну</div>
+            <div className="mb-3 text-xs text-zinc-500">Відкритих даних мало? Перевірте сайт чи соцмережі вручну й допишіть знайдене в контакти (олівець вище).</div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                ["Google", `${b.name} ${b.city || ""}`],
+                ["Instagram", `site:instagram.com ${b.name} ${b.city || ""}`],
+                ["Facebook", `site:facebook.com ${b.name} ${b.city || ""}`],
+              ].map(([l, q]) => (
+                <a key={l} className="btn-ghost px-3 py-1.5 text-xs" target="_blank" rel="noreferrer" href={`https://www.google.com/search?q=${encodeURIComponent(q.trim())}`}>{l} <ExternalLink className="h-3 w-3" /></a>
+              ))}
+              <a className="btn-ghost px-3 py-1.5 text-xs" target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${b.name} ${b.address || b.city || ""}`.trim())}`}>Google Maps <ExternalLink className="h-3 w-3" /></a>
+            </div>
+          </section>
+
+          <section className="card card-pad">
             <div className="mb-3 text-sm font-medium text-zinc-200">Оцінка Lead Score</div>
             <div className="space-y-1.5">
               {b.score_breakdown.map((s) => <div key={s.key} className="flex justify-between text-sm"><span className="text-zinc-400">{s.label}</span><span className="font-mono text-emerald-400">+{s.points}</span></div>)}

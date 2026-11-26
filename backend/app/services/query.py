@@ -61,7 +61,8 @@ def build_query(f: BusinessFilter):
     if f.job_id:
         stmt = stmt.where(Business.id.in_(select(JobResult.business_id).where(JobResult.job_id == f.job_id)))
     col = SORTABLE.get(f.sort, Business.lead_score)
-    stmt = stmt.order_by(col.desc() if f.order == "desc" else col.asc(), Business.id.desc())
+    # за однакового score вище ті, з ким можна зв'язатися, і з більшою кількістю даних
+    stmt = stmt.order_by(col.desc() if f.order == "desc" else col.asc(), Business.contact_verified.desc(), Business.id.desc())
     return stmt
 
 

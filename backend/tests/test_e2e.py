@@ -76,7 +76,8 @@ def test_full_flow(client):
     assert hd["website_status"] == "no" and "no_booking" in hd["problems"]
     assert len(hd["sources_full"]) == 2 and hd["opening_hours"]  # дані дубля злито
     assert hd["contact_verified"] is True
-    assert "McDonald's" not in m
+    assert "McDonald's" not in m and "Мережа Кава Плюс" not in m
+    assert any("Мережа Кава Плюс" in l["message"] for l in logs)
 
 
 def test_dedup_on_repeat_search(client):
@@ -129,9 +130,9 @@ def test_scoring_settings(client):
     r = client.put("/api/settings/scoring", json={"weights": w, "thresholds": {"high": 70, "medium": 40}}).json()
     assert r["rescored"] >= 5
     hair = by_name(client)["Перукарня Олена"]
-    assert hair["lead_score"] == min(100, 50 + 10 + 10)
+    assert hair["lead_score"] == min(100, 50 + 10 + 10 + 5)  # + ніша з високим чеком
     client.post("/api/settings/reset-scoring")
-    assert by_name(client)["Перукарня Олена"]["lead_score"] == 30 + 10 + 10
+    assert by_name(client)["Перукарня Олена"]["lead_score"] == 30 + 10 + 10 + 5
     bad = client.put("/api/settings/scoring", json={"weights": w, "thresholds": {"high": 30, "medium": 40}})
     assert bad.status_code == 400
 
@@ -186,3 +187,13 @@ def test_resume_interrupted(client):
     assert client.get(f"/api/jobs/{jid}").json()["status"] == "interrupted"
     client.post(f"/api/jobs/{jid}/resume")
     assert wait_job(client, jid)["status"] == "completed"
+
+
+def test_limit_does_not_leave_extra_records(client):
+    """Записи понад ліміт (паралельна обробка) не залишаються в базі."""
+    for b in client.get("/api/businesses?page_size=100").json()["items"]:
+        client.delete(f"/api/businesses/{b['id']}")
+    job = wait_job(client, client.post("/api/search", json={**SEARCH, "limit": 2}).json()["id"])
+    assert job["saved_count"] == 2
+    assert client.get("/api/businesses").json()["total"] == 2
+    assert client.get(f"/api/businesses?job_id={job['id']}").json()["total"] == 2

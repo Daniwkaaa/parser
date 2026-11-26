@@ -71,6 +71,9 @@ CATEGORIES: list[Category] = [
 
 _NOUNS = {'restaurant': 'Ресторан', 'cafe': "Кав'ярня", 'bar': 'Бар', 'fast_food': 'Заклад', 'bakery': 'Пекарня', 'beauty': 'Салон краси', 'hairdresser': 'Перукарня', 'nails': 'Студія', 'car_repair': 'Автосервіс', 'car_wash': 'Автомийка', 'tyres': 'Шиномонтаж', 'car_parts': 'Магазин автозапчастин', 'hotel': 'Готель', 'hostel': 'Хостел', 'apartment': 'Апартаменти', 'shop': 'Магазин', 'construction': 'Компанія', 'dentist': 'Стоматологія', 'clinic': 'Клініка', 'veterinary': 'Ветклініка', 'fitness': 'Клуб', 'services': 'Бізнес'}
 CATEGORIES = [Category(**{**c.__dict__, "noun": _NOUNS.get(c.key, "Бізнес")}) for c in CATEGORIES]
+# Ніші з вищим середнім чеком, де цифрові послуги окуповуються швидше
+HIGH_VALUE = {"restaurant", "hotel", "hostel", "apartment", "dentist", "clinic", "beauty", "hairdresser", "nails",
+              "car_repair", "construction", "fitness", "veterinary"}
 CATEGORY_MAP = {c.key: c for c in CATEGORIES}
 
 GROUP_LABELS = {

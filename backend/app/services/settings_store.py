@@ -21,6 +21,8 @@ DEFAULTS: dict[str, Any] = {
             "has_contact": 10,
             "incomplete_info": 5,
             "website_improvable": 5,
+            "high_value_niche": 5,
+            "popular_business": 5,
         },
         "thresholds": {"high": 70, "medium": 40},
     },
@@ -46,6 +48,8 @@ SCORING_LABELS = {
     "has_contact": "Є публічний телефон або email",
     "incomplete_info": "Неповна інформація про бізнес",
     "website_improvable": "Сайт є, але має що покращити",
+    "high_value_niche": "Ніша з високим чеком (ресторани, готелі, клініки, салони, СТО, ремонт)",
+    "popular_business": "Популярний бізнес (рейтинг ≥ 4.0 і ≥ 30 відгуків)",
 }
 
 

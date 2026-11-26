@@ -52,6 +52,9 @@ def overpass_payload(port: int) -> dict:
         # мережа — має бути виключена
         {"type": "node", "id": 7, "lat": 49.8440, "lon": 24.0340, "tags": {
             "amenity": "fast_food", "name": "McDonald's", "brand": "McDonald's", "brand:wikidata": "Q38076"}},
+        # локальна мережа без тегу brand: та сама назва в двох різних місцях — має бути виключена
+        {"type": "node", "id": 9, "lat": 49.8300, "lon": 24.0100, "tags": {"amenity": "cafe", "name": "Мережа Кава Плюс"}},
+        {"type": "node", "id": 10, "lat": 49.8600, "lon": 24.0600, "tags": {"amenity": "cafe", "name": "Мережа Кава Плюс"}},
         # без назви — пропускається
         {"type": "node", "id": 8, "lat": 49.8, "lon": 24.0, "tags": {"amenity": "cafe"}},
     ]}

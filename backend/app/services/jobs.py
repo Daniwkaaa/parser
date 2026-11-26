@@ -17,6 +17,7 @@ from ..sources.base import RawBusiness, SearchArea
 from ..sources.registry import SOURCES
 from . import settings_store
 from .geocode import GeocodeError, resolve_area
+from .dedup import distance_m, normalize_name
 from .processor import finalize, upsert_raw
 
 log = logging.getLogger("leadfinder.jobs")
@@ -85,6 +86,30 @@ def recover_interrupted() -> None:
         db.close()
 
 
+def detect_chains(cands: list[RawBusiness], min_locations: int = 2, min_distance_m: float = 300) -> set[str]:
+    """Мережа = та сама назва в кількох різних місцях (далі ніж min_distance_m) або тег brand у будь-якої з точок.
+
+    OSM часто не має тегу brand для локальних мереж, тому дивимося на повтори назви в межах пошуку.
+    """
+    groups: dict[str, list[RawBusiness]] = {}
+    for c in cands:
+        key = normalize_name(c.name)
+        if len(key) >= 3:
+            groups.setdefault(key, []).append(c)
+    chains: set[str] = set()
+    for key, items in groups.items():
+        if any(i.brand for i in items):
+            chains.add(key)
+            continue
+        spots: list[RawBusiness] = []
+        for i in items:
+            if all(distance_m(i.lat, i.lon, j.lat, j.lon) > min_distance_m for j in spots):
+                spots.append(i)
+        if len(spots) >= min_locations:
+            chains.add(key)
+    return chains
+
+
 def _matches(problems: list[str], wanted: list[str]) -> bool:
     if not wanted:
         return True
@@ -128,6 +153,7 @@ def _run(job_id: int) -> None:
         else:
             ctx.update(stage="collect")
             candidates = []
+            candidates_all: list[RawBusiness] = []
             for src_key in params.get("sources") or ["osm"]:
                 cls = SOURCES.get(src_key)
                 if not cls:
@@ -144,13 +170,16 @@ def _run(job_id: int) -> None:
                     ctx.log("error", f"{cls.label}: помилка — {e}")
                     continue
                 candidates.extend(found)
+                candidates_all = candidates
                 if ctx.cancelled:
                     break
             if exclude_chains:
+                chains = detect_chains(candidates)
                 before = len(candidates)
-                candidates = [c for c in candidates if not c.brand]
+                candidates = [c for c in candidates if not c.brand and normalize_name(c.name) not in chains]
                 if before - len(candidates):
-                    ctx.log("info", f"Виключено мережевих брендів: {before - len(candidates)}")
+                    sample = ", ".join(sorted({c.name for c in candidates_all if normalize_name(c.name) in chains})[:8])
+                    ctx.log("info", f"Виключено мережевих закладів: {before - len(candidates)}" + (f" (мережі за назвою: {sample})" if sample else ""))
             ctx.update(candidates=[c.to_dict() for c in candidates], found_count=len(candidates), progress_total=len(candidates))
             ctx.log("info", f"Знайдено кандидатів: {len(candidates)}")
             if not candidates:
@@ -159,7 +188,7 @@ def _run(job_id: int) -> None:
                 return
 
         processed = set(params.get("_processed") or [])
-        counters = {k: getattr(job, k) or 0 for k in ("saved_count", "new_count", "duplicate_count", "skipped_count", "progress_done")}
+        counters: dict[str, int] = {k: getattr(job, k) or 0 for k in ("saved_count", "new_count", "duplicate_count", "skipped_count", "progress_done")}
         ctx.update(stage="analyze", progress_total=len(candidates))
         ctx.log("info", "Аналізую цифрову присутність (перевірка сайтів)…" if check_websites else "Аналізую дані (без перевірки сайтів)…")
 
@@ -199,14 +228,20 @@ def _run(job_id: int) -> None:
                         status = "новий" if is_new else f"дубль ({reason}) — дані об'єднано"
                         ctx.log("info", f"✓ {biz.name}: {biz.lead_score} балів, {status}")
                     else:
-                        counters["skipped_count"] += 1
-                        if is_new and not matched:
+                        # не відповідає фільтрам або ліміт уже досягнуто паралельними потоками:
+                        # новий запис не залишаємо в базі, щоб база збігалася зі звітом завдання
+                        if matched:
+                            counters["overflow"] = counters.get("overflow", 0) + 1
+                        else:
+                            counters["skipped_count"] += 1
+                        if is_new:
+                            s.execute(delete(JobResult).where(JobResult.business_id == biz_id))
                             s.execute(delete(SourceRef).where(SourceRef.business_id == biz_id))
                             s.delete(biz)
                             s.commit()
                     p = dict(params)
                     p["_processed"] = list(processed)
-                    ctx.update(params=p, **counters)
+                    ctx.update(params=p, **{k: v for k, v in counters.items() if k != "overflow"})
                 finally:
                     s.close()
             return True
