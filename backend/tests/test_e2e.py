@@ -197,3 +197,11 @@ def test_limit_does_not_leave_extra_records(client):
     assert job["saved_count"] == 2
     assert client.get("/api/businesses").json()["total"] == 2
     assert client.get(f"/api/businesses?job_id={job['id']}").json()["total"] == 2
+
+
+def test_map_settings(client):
+    assert client.get("/api/meta").json()["map"]["style"] == "dark"
+    assert client.put("/api/settings/map", json={"style": "custom", "custom_url": "http://bad"}).status_code == 400
+    ok = client.put("/api/settings/map", json={"style": "custom", "custom_url": "https://t.example/{z}/{x}/{y}.png"})
+    assert ok.status_code == 200 and client.get("/api/meta").json()["map"]["style"] == "custom"
+    client.put("/api/settings/map", json={"style": "dark"})

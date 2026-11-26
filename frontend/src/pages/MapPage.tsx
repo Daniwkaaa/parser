@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
+import { MapContainer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import { api, type Filters } from "../lib/api";
 import { useMeta } from "../lib/meta";
 import { Chips, Empty, PageHeader, ScoreBadge, Spinner } from "../components/ui";
-import { TILE_ATTR, TILE_URL, tierIcon } from "../components/mapUtils";
+import { BaseLayer, tierIcon } from "../components/mapUtils";
 
 type Pt = Awaited<ReturnType<typeof api.mapPoints>>[number];
 
@@ -40,7 +40,7 @@ export default function MapPage() {
           <div className="card overflow-hidden p-1">
             <div className="h-[calc(100vh-290px)] min-h-[420px]">
               <MapContainer center={[49.0, 31.0]} zoom={6} style={{ height: "100%" }}>
-                <TileLayer url={TILE_URL} attribution={TILE_ATTR} />
+                <BaseLayer />
                 <FitBounds pts={pts} />
                 {pts.map((p) => (
                   <Marker key={p.id} position={[p.lat, p.lon]} icon={tierIcon(p.lead_tier)}>

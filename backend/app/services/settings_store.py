@@ -28,6 +28,9 @@ DEFAULTS: dict[str, Any] = {
     },
     "sources": {"osm": True, "google_places": False, "serpapi": False},
     "api_keys": {"google_places": "", "serpapi": ""},
+    # Підкладка карти: dark — стандартні тайли OpenStreetMap із темним CSS-фільтром (без ключа),
+    # light — ті самі тайли без фільтра, custom — власний URL тайлів (напр. CARTO або MapTiler з вашим ключем)
+    "map": {"style": "dark", "custom_url": "", "custom_attribution": ""},
     "search": {
         "country": "Україна",
         "limit": 100,

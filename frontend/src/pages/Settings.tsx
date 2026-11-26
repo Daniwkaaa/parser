@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Database, SlidersHorizontal, Gauge, Download, Check, RotateCcw, ExternalLink } from "lucide-react";
-import { api, type SettingsData } from "../lib/api";
+import { KeyRound, Database, SlidersHorizontal, Gauge, Download, Check, RotateCcw, ExternalLink, Map as MapIcon } from "lucide-react";
+import { api, type MapSettings, type SettingsData } from "../lib/api";
+import { useMeta, useMetaReload } from "../lib/meta";
 import { PageHeader, Spinner, Toggle } from "../components/ui";
 
 const KEY_LINKS: Record<string, string> = {
@@ -18,6 +19,10 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const meta = useMeta();
+  const reloadMeta = useMetaReload();
+  const [mapCfg, setMapCfg] = useState<MapSettings>(meta.map);
+  const [mapErr, setMapErr] = useState<string | null>(null);
   const load = () => api.settings().then(setS);
   useEffect(() => { load(); }, []);
   const flash = (k: string) => { setSaved(k); setTimeout(() => setSaved(null), 2000); };
@@ -102,6 +107,25 @@ export default function SettingsPage() {
             <button className="btn-primary" onClick={saveScoring} disabled={busy}>{busy && <Spinner />} Зберегти й перерахувати</button>
             <button className="btn-ghost" onClick={async () => { const r = await api.resetScoring(); await load(); setMsg(`Скинуто до стандартних, перераховано ${r.rescored}`); }}><RotateCcw className="h-4 w-4" /> Стандартні</button>
           </div>
+        </section>
+
+        <section className="card card-pad animate-fade-up">
+          <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><MapIcon className="h-4 w-4 text-accent-400" /> Карта</div><Saved show={saved === "map"} /></div>
+          <div className="space-y-2">
+            {([["dark", "Темна (OpenStreetMap, безкоштовно, без ключа)"], ["light", "Світла (OpenStreetMap, безкоштовно, без ключа)"], ["custom", "Власний сервер тайлів (CARTO, MapTiler тощо з вашим ключем)"]] as const).map(([k, l]) => (
+              <label key={k} className="flex cursor-pointer items-center gap-2 text-sm text-zinc-300">
+                <input type="radio" name="mapstyle" className="accent-[#7c6cff]" checked={mapCfg.style === k} onChange={() => setMapCfg({ ...mapCfg, style: k })} />{l}
+              </label>
+            ))}
+          </div>
+          {mapCfg.style === "custom" && (
+            <div className="mt-3 space-y-3">
+              <div><label className="label">URL тайлів</label><input className="input font-mono" placeholder="https://api.maptiler.com/maps/streets-v2-dark/{z}/{x}/{y}.png?key=ВАШ_КЛЮЧ" value={mapCfg.custom_url} onChange={(e) => setMapCfg({ ...mapCfg, custom_url: e.target.value })} /></div>
+              <div><label className="label">Атрибуція</label><input className="input" placeholder="© MapTiler © OpenStreetMap contributors" value={mapCfg.custom_attribution} onChange={(e) => setMapCfg({ ...mapCfg, custom_attribution: e.target.value })} /></div>
+            </div>
+          )}
+          {mapErr && <div className="mt-2 text-xs text-rose-300">{mapErr}</div>}
+          <button className="btn-ghost mt-4" onClick={async () => { setMapErr(null); try { await api.saveMap(mapCfg); await reloadMeta(); flash("map"); } catch (e: any) { setMapErr(e.message); } }}>Зберегти карту</button>
         </section>
 
         <section className="card card-pad animate-fade-up">

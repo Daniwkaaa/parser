@@ -17,8 +17,9 @@ router = APIRouter(prefix="/api", tags=["settings"])
 
 
 @router.get("/meta")
-def meta():
+def meta(db: Session = Depends(get_db)):
     return {
+        "map": settings_store.get_value(db, "map"),
         "categories": [{"key": c.key, "label": c.label, "group": c.group, "offer_kind": c.offer_kind, "booking_kind": c.booking_kind} for c in CATEGORIES],
         "groups": GROUP_LABELS,
         "problems": PROBLEM_LABELS,
@@ -59,6 +60,19 @@ def put_search(body: dict, db: Session = Depends(get_db)):
     allowed = set(settings_store.DEFAULTS["search"])
     with db_lock:
         return settings_store.set_value(db, "search", {k: v for k, v in body.items() if k in allowed})
+
+
+@router.put("/settings/map")
+def put_map(body: dict, db: Session = Depends(get_db)):
+    style = body.get("style", "dark")
+    if style not in ("dark", "light", "custom"):
+        raise HTTPException(400, "Невідомий стиль карти")
+    url = (body.get("custom_url") or "").strip()
+    if style == "custom" and not (url.startswith("https://") and "{z}" in url and "{x}" in url and "{y}" in url):
+        raise HTTPException(400, "Вкажіть URL тайлів виду https://…/{z}/{x}/{y}.png")
+    with db_lock:
+        return settings_store.set_value(db, "map", {"style": style, "custom_url": url,
+                                                    "custom_attribution": (body.get("custom_attribution") or "").strip()})
 
 
 @router.put("/settings/api-keys")

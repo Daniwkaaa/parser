@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { MapContainer, Marker, TileLayer } from "react-leaflet";
+import { MapContainer, Marker } from "react-leaflet";
 import { ArrowLeft, RefreshCw, Trash2, ExternalLink, Phone, Mail, Globe, Instagram, Facebook, MapPin, Clock, Sparkles, AlertCircle, Pencil, Check, X, Send } from "lucide-react";
 import { api, type BusinessFull } from "../lib/api";
 import { useMeta } from "../lib/meta";
 import { ensureUrl, fmtDate, socialUrl } from "../lib/format";
 import { Empty, ScoreBadge, Spinner, StatusBadge } from "../components/ui";
-import { TILE_ATTR, TILE_URL, tierIcon } from "../components/mapUtils";
+import { BaseLayer, tierIcon } from "../components/mapUtils";
 
 function Row({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
   return (
@@ -186,7 +186,7 @@ export default function BusinessDetail() {
             <section className="card overflow-hidden">
               <div className="h-56">
                 <MapContainer center={[b.lat, b.lon]} zoom={16} scrollWheelZoom={false} style={{ height: "100%", borderRadius: 0 }}>
-                  <TileLayer url={TILE_URL} attribution={TILE_ATTR} />
+                  <BaseLayer />
                   <Marker position={[b.lat, b.lon]} icon={tierIcon(b.lead_tier)} />
                 </MapContainer>
               </div>

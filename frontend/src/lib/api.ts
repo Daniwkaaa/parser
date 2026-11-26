@@ -39,7 +39,10 @@ export interface Job {
 
 export interface JobLog { id: number; ts: string; level: string; message: string }
 
+export interface MapSettings { style: "dark" | "light" | "custom"; custom_url: string; custom_attribution: string }
+
 export interface Meta {
+  map: MapSettings;
   categories: { key: string; label: string; group: string; offer_kind: string; booking_kind: string }[];
   groups: Record<string, string>; problems: Record<string, string>; status_labels: Record<string, string>;
   client_statuses: Record<string, string>;
@@ -123,6 +126,7 @@ export const api = {
   resetScoring: () => req<{ rescored: number }>("/api/settings/reset-scoring", { method: "POST" }),
   saveSources: (body: Record<string, boolean>) => req("/api/settings/sources", { method: "PUT", body: JSON.stringify(body) }),
   saveSearchDefaults: (body: Record<string, unknown>) => req("/api/settings/search", { method: "PUT", body: JSON.stringify(body) }),
+  saveMap: (body: MapSettings) => req<MapSettings>("/api/settings/map", { method: "PUT", body: JSON.stringify(body) }),
   saveKeys: (body: Record<string, string>) => req("/api/settings/api-keys", { method: "PUT", body: JSON.stringify(body) }),
   exportUrl: (format: "csv" | "xlsx", f: Filters, ids?: number[]) =>
     `/api/export?${filtersToQuery(f, { format, ...(ids && ids.length ? { ids: ids.join(",") } : {}) })}`,
