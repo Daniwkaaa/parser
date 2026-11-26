@@ -31,6 +31,8 @@ DEFAULTS: dict[str, Any] = {
     # Підкладка карти: dark — стандартні тайли OpenStreetMap із темним CSS-фільтром (без ключа),
     # light — ті самі тайли без фільтра, custom — власний URL тайлів (напр. CARTO або MapTiler з вашим ключем)
     "map": {"style": "dark", "custom_url": "", "custom_attribution": ""},
+    # Дані відправника для готових повідомлень (необов'язково)
+    "outreach": {"sender_name": "", "company": "", "phone": "", "portfolio": "", "gender": "m"},
     "search": {
         "country": "Україна",
         "limit": 100,

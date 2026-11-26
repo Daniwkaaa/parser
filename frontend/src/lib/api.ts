@@ -64,6 +64,7 @@ export interface SettingsData {
   scoring: { weights: Record<string, number>; thresholds: { high: number; medium: number } };
   sources: Record<string, boolean>;
   api_keys: Record<string, { configured: boolean; from_env: boolean; masked: string }>;
+  outreach: { sender_name: string; company: string; phone: string; portfolio: string; gender: string };
   search: { country: string; limit: number; radius_km: number; exclude_chains: boolean; check_websites: boolean; language: string };
   scoring_labels: Record<string, string>;
   source_list: Meta["sources"];
@@ -126,6 +127,10 @@ export const api = {
   resetScoring: () => req<{ rescored: number }>("/api/settings/reset-scoring", { method: "POST" }),
   saveSources: (body: Record<string, boolean>) => req("/api/settings/sources", { method: "PUT", body: JSON.stringify(body) }),
   saveSearchDefaults: (body: Record<string, unknown>) => req("/api/settings/search", { method: "PUT", body: JSON.stringify(body) }),
+  regions: () => req<{ name: string; cities: string[] }[]>("/api/regions"),
+  outreach: (id: number, variant: number, channel: "instagram" | "email") =>
+    req<{ text: string; subject: string | null; variant: number; channel: string }>(`/api/businesses/${id}/outreach?variant=${variant}&channel=${channel}`),
+  saveOutreach: (body: Record<string, string>) => req<Record<string, string>>("/api/settings/outreach", { method: "PUT", body: JSON.stringify(body) }),
   saveMap: (body: MapSettings) => req<MapSettings>("/api/settings/map", { method: "PUT", body: JSON.stringify(body) }),
   saveKeys: (body: Record<string, string>) => req("/api/settings/api-keys", { method: "PUT", body: JSON.stringify(body) }),
   exportUrl: (format: "csv" | "xlsx", f: Filters, ids?: number[]) =>

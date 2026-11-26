@@ -12,6 +12,7 @@ from .sources.registry import SOURCES
 
 
 class SearchRequest(BaseModel):
+    scope: Literal["city", "oblast", "country"] = "city"
     country: str | None = "Україна"
     region: str | None = None
     city: str | None = None
@@ -20,7 +21,7 @@ class SearchRequest(BaseModel):
     lat: float | None = Field(default=None, ge=-90, le=90)
     lon: float | None = Field(default=None, ge=-180, le=180)
     categories: list[str] = Field(min_length=1)
-    limit: int = Field(default=100, ge=1, le=1000)
+    limit: int = Field(default=100, ge=1, le=5000)
     problems: list[str] = []
     comprehensive: bool = True
     sources: list[str] = ["osm"]

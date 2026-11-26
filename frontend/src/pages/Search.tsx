@@ -16,6 +16,9 @@ export default function SearchPage() {
   const meta = useMeta();
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [form, setForm] = useState({ country: "Україна", region: "", city: "", district: "", radius_km: 0, limit: 100 });
+  const [scope, setScope] = useState<"city" | "oblast" | "country">("city");
+  const [oblast, setOblast] = useState("");
+  const [regions, setRegions] = useState<{ name: string; cities: string[] }[]>([]);
   const [cats, setCats] = useState<string[]>([]);
   const [problems, setProblems] = useState<string[]>([]);
   const [comprehensive, setComprehensive] = useState(true);
@@ -38,6 +41,7 @@ export default function SearchPage() {
       setExcludeChains(s.search.exclude_chains);
       setSources(Object.entries(s.sources).filter(([k, v]) => v && (k === "osm" || s.api_keys[k]?.configured)).map(([k]) => k));
     });
+    api.regions().then(setRegions);
     api.jobs().then((js) => {
       setHistory(js);
       const active = js.find((j) => j.status === "running" || j.status === "queued");
@@ -84,12 +88,14 @@ export default function SearchPage() {
 
   async function start() {
     setErr(null);
-    if (!form.city && !form.region) return setErr("Вкажіть місто (або регіон)");
+    if (scope === "city" && !form.city && !form.region) return setErr("Вкажіть місто (або регіон)");
+    if (scope === "oblast" && !oblast) return setErr("Оберіть область");
     if (!cats.length) return setErr("Оберіть хоча б одну категорію бізнесу");
     if (!comprehensive && !problems.length) return setErr("Оберіть типи проблем або увімкніть комплексний пошук");
     try {
       const j = await api.search({
-        country: form.country || null, region: form.region || null, city: form.city || null, district: form.district || null,
+        scope, country: form.country || null, region: scope === "oblast" ? oblast : form.region || null,
+        city: scope === "city" ? form.city || null : null, district: scope === "city" ? form.district || null : null,
         radius_km: form.radius_km || null, limit: form.limit, categories: cats, problems: comprehensive ? [] : problems,
         comprehensive, sources, check_websites: checkSites, exclude_chains: excludeChains,
       });
@@ -108,7 +114,32 @@ export default function SearchPage() {
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
         <div className="space-y-5">
           <section className="card card-pad animate-fade-up">
-            <div className="mb-4 flex items-center gap-2 text-sm font-medium text-zinc-200"><MapPin className="h-4 w-4 text-accent-400" /> Локація</div>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><MapPin className="h-4 w-4 text-accent-400" /> Локація</div>
+              <div className="flex rounded-xl border border-white/10 bg-ink-850 p-1 text-xs">
+                {([["city", "Місто / район"], ["oblast", "Уся область"], ["country", "Уся Україна"]] as const).map(([k, l]) => (
+                  <button key={k} type="button" onClick={() => setScope(k)} className={`rounded-lg px-3 py-1.5 transition ${scope === k ? "bg-accent-500 text-white" : "text-zinc-400 hover:text-zinc-200"}`}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {scope === "oblast" && (
+              <div>
+                <label className="label">Область</label>
+                <select className="input" value={oblast} onChange={(e) => setOblast(e.target.value)}>
+                  <option value="">Оберіть область…</option>
+                  {regions.map((r) => <option key={r.name} value={r.name}>{r.name} ({r.cities.length} міст)</option>)}
+                </select>
+                {oblast && <div className="mt-2 text-xs text-zinc-500">Міста: {regions.find((r) => r.name === oblast)?.cities.join(", ")}</div>}
+              </div>
+            )}
+            {scope !== "city" && (
+              <div className="mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 text-xs leading-relaxed text-zinc-500">
+                {scope === "country" ? `Пошук по ${regions.reduce((n, r) => n + r.cities.length, 0)} містах ${regions.length} регіонів. ` : ""}
+                Лише території під контролем України: окуповані Крим і Луганщина не входять, а в Донецькій, Запорізькій, Херсонській і Харківській областях беруться тільки підконтрольні неприфронтові міста.
+                Міста обробляються по черзі з паузами (правила OSM), тож великий пошук триває довше. Ліміт розподіляється між містами.
+              </div>
+            )}
+            {scope === "city" && (<>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div><label className="label">Країна</label><input className="input" value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} /></div>
               <div><label className="label">Область / регіон</label><input className="input" placeholder="напр. Львівська область" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} /></div>
@@ -125,6 +156,7 @@ export default function SearchPage() {
               </button>
             </div>
             {geo && <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300">Знайдено: {geo.label}</div>}
+            </>)}
           </section>
 
           <section className="card card-pad animate-fade-up">
@@ -177,7 +209,7 @@ export default function SearchPage() {
             <div className="mt-5 grid gap-4 md:grid-cols-3">
               <div>
                 <label className="label">Кількість результатів</label>
-                <input type="number" min={1} max={1000} className="input" value={form.limit} onChange={(e) => setForm({ ...form, limit: Math.max(1, Math.min(1000, Number(e.target.value) || 1)) })} />
+                <input type="number" min={1} max={5000} className="input" value={form.limit} onChange={(e) => setForm({ ...form, limit: Math.max(1, Math.min(5000, Number(e.target.value) || 1)) })} />
               </div>
               <Toggle checked={checkSites} onChange={setCheckSites} label="Перевіряти сайти" hint="Відкриває сайти бізнесів для аналізу (з дотриманням robots.txt)" />
               <Toggle checked={excludeChains} onChange={setExcludeChains} label="Виключати мережі" hint="Пропускати великі бренди (McDonald's, АТБ тощо)" />
@@ -203,7 +235,7 @@ export default function SearchPage() {
             ) : (
               <>
                 <div className="text-xs text-zinc-500">{job.location_label || [job.params.city, job.params.region].filter(Boolean).join(", ")}</div>
-                <div className="mt-3 flex items-center justify-between text-xs text-zinc-400"><span>{STAGES[job.stage] || job.stage}</span><span className="font-mono">{job.progress_done}/{job.progress_total || "?"}</span></div>
+                <div className="mt-3 flex items-center justify-between text-xs text-zinc-400"><span>{STAGES[job.stage] || job.stage}{job.stage === "collect" && job.params.scope && job.params.scope !== "city" ? " (міста)" : ""}</span><span className="font-mono">{job.progress_done}/{job.progress_total || "?"}</span></div>
                 <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-ink-700">
                   <div className={`h-full rounded-full bg-gradient-to-r from-accent-500 to-indigo-400 transition-all duration-500 ${running && !job.progress_total ? "w-1/3 animate-pulse" : ""}`} style={job.progress_total ? { width: `${pct}%` } : undefined} />
                 </div>
@@ -239,7 +271,7 @@ export default function SearchPage() {
                 return (
                   <div key={h.id} className="flex items-center gap-2 rounded-xl px-2 py-2 hover:bg-white/[0.03]">
                     <button className="min-w-0 flex-1 text-left" onClick={() => { setLogs([]); setJob(h); }}>
-                      <div className="truncate text-sm text-zinc-200">{h.params.city || h.params.region} <span className="text-zinc-500">· {(h.params.categories || []).slice(0, 2).map(catLabel).join(", ")}{(h.params.categories || []).length > 2 ? "…" : ""}</span></div>
+                      <div className="truncate text-sm text-zinc-200">{h.params.scope === "country" ? "Уся Україна" : h.params.city || h.params.region} <span className="text-zinc-500">· {(h.params.categories || []).slice(0, 2).map(catLabel).join(", ")}{(h.params.categories || []).length > 2 ? "…" : ""}</span></div>
                       <div className="text-xs text-zinc-500">{fmtDate(h.created_at)} · <span className={cls}>{label}</span> · {h.saved_count} збережено</div>
                     </button>
                     {!["running", "queued"].includes(h.status) && (

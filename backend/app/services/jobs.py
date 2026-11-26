@@ -16,6 +16,7 @@ from ..models import Business, JobLog, JobResult, SearchJob, SourceRef
 from ..sources.base import RawBusiness, SearchArea
 from ..sources.registry import SOURCES
 from . import settings_store
+from ..regions import targets
 from .geocode import GeocodeError, resolve_area
 from .dedup import distance_m, normalize_name
 from .processor import finalize, upsert_raw
@@ -122,7 +123,7 @@ def _run(job_id: int) -> None:
     try:
         job = db.get(SearchJob, job_id)
         params = dict(job.params or {})
-        resuming = bool(job.candidates)
+        resuming = bool(job.candidates) or bool(params.get("_targets_done"))
         ctx.update(status="running", stage="geocode", started_at=job.started_at or _now(), error=None, finished_at=None)
         ctx.log("info", "Продовжую перерване завдання" if resuming else "Завдання запущено")
 
@@ -132,29 +133,13 @@ def _run(job_id: int) -> None:
         check_websites = bool(params.get("check_websites", True))
         exclude_chains = bool(params.get("exclude_chains", True))
 
-        # 1. Територія
-        if params.get("_area"):
-            area = SearchArea.from_dict(params["_area"])
-        else:
-            ctx.log("info", "Визначаю територію пошуку через Nominatim…")
-            with db_lock:
-                area = resolve_area(db, country=params.get("country"), region=params.get("region"), city=params.get("city"),
-                                    district=params.get("district"), radius_km=params.get("radius_km"),
-                                    lat=params.get("lat"), lon=params.get("lon"))
-            params["_area"] = area.to_dict()
-            ctx.update(params=params, location_label=area.label)
-            ctx.log("info", f"Територія: {area.label}")
-        region_code = area.country_code or "UA"
+        scope = params.get("scope") or "city"
+        sources = params.get("sources") or ["osm"]
+        categories = params.get("categories") or []
 
-        # 2. Збір кандидатів (зберігається як проміжний результат)
-        if resuming:
-            candidates = [RawBusiness.from_dict(c) for c in job.candidates]
-            ctx.log("info", f"Використовую збережені проміжні результати: {len(candidates)} кандидатів")
-        else:
-            ctx.update(stage="collect")
-            candidates = []
-            candidates_all: list[RawBusiness] = []
-            for src_key in params.get("sources") or ["osm"]:
+        def fetch(area: SearchArea, per_limit: int, target_idx: int) -> list[RawBusiness]:
+            got: list[RawBusiness] = []
+            for src_key in sources:
                 cls = SOURCES.get(src_key)
                 if not cls:
                     continue
@@ -163,24 +148,95 @@ def _run(job_id: int) -> None:
                 if not src.is_available():
                     ctx.log("warning", f"{cls.label}: не задано API-ключ, джерело пропущено")
                     continue
-                ctx.log("info", f"Збираю дані з джерела: {cls.label}")
                 try:
-                    found = src.search(area, params.get("categories") or [], limit, ctx.log)
-                except Exception as e:  # помилка одного джерела не зупиняє інші
+                    found = src.search(area, categories, per_limit, ctx.log)
+                except Exception as e:  # помилка одного джерела чи міста не зупиняє решту
                     ctx.log("error", f"{cls.label}: помилка — {e}")
                     continue
-                candidates.extend(found)
-                candidates_all = candidates
-                if ctx.cancelled:
+                for f in found:
+                    f.tags = {**(f.tags or {}), "_target": target_idx}
+                got.extend(found)
+            return got
+
+        def save_partial(cands: list[RawBusiness], **extra) -> None:
+            ctx.update(candidates=[c.to_dict() for c in cands], found_count=len(cands), params=params, **extra)
+
+        # 1–2. Територія і збір кандидатів (проміжні результати зберігаються після кожного міста)
+        collected = bool(params.get("_collected")) or (bool(job.candidates) and scope == "city")
+        candidates = [RawBusiness.from_dict(c) for c in (job.candidates or [])]
+        region_code = "UA"
+        if collected:
+            ctx.log("info", f"Використовую збережені проміжні результати: {len(candidates)} кандидатів")
+            if params.get("_area"):
+                region_code = SearchArea.from_dict(params["_area"]).country_code or "UA"
+        elif scope == "city":
+            if params.get("_area"):
+                area = SearchArea.from_dict(params["_area"])
+            else:
+                ctx.log("info", "Визначаю територію пошуку через Nominatim…")
+                with db_lock:
+                    area = resolve_area(db, country=params.get("country"), region=params.get("region"), city=params.get("city"),
+                                        district=params.get("district"), radius_km=params.get("radius_km"),
+                                        lat=params.get("lat"), lon=params.get("lon"))
+                params["_area"] = area.to_dict()
+                ctx.update(params=params, location_label=area.label)
+                ctx.log("info", f"Територія: {area.label}")
+            region_code = area.country_code or "UA"
+            ctx.update(stage="collect")
+            candidates = fetch(area, limit, 0)
+        else:
+            tgts = targets(scope, params.get("region"))
+            label = f"{params.get('region')} — {len(tgts)} міст" if scope == "oblast" else f"Україна (підконтрольна територія) — до {len(tgts)} міст"
+            ctx.update(stage="collect", location_label=label)
+            enough = limit * 3
+            per_city = max(30, -(-limit * 2 // min(len(tgts), 24)))
+            done = int(params.get("_targets_done") or 0)
+            ctx.log("info", f"Пошук по {label}. Міста обробляються по черзі з паузами, щоб не перевантажувати сервери OSM.")
+            for i in range(done, len(tgts)):
+                if ctx.cancelled or len(candidates) >= enough:
                     break
+                city, region = tgts[i]
+                try:
+                    with db_lock:
+                        area = resolve_area(db, country="Україна", region=None if region == "Київ" else region, city=city)
+                except GeocodeError as e:
+                    ctx.log("warning", f"{city}: не вдалося визначити територію ({e}), пропускаю")
+                    params["_targets_done"] = i + 1
+                    continue
+                got = fetch(area, per_city, i)
+                candidates.extend(got)
+                params["_targets_done"] = i + 1
+                save_partial(candidates, progress_total=len(tgts), progress_done=i + 1)
+                ctx.log("info", f"{city} ({region}): {len(got)} кандидатів, усього {len(candidates)}")
+            if ctx.cancelled:
+                ctx.update(status="cancelled", stage="cancelled", finished_at=_now())
+                ctx.log("warning", "Завдання зупинено користувачем; зібрані дані збережено, можна продовжити")
+                return
+            # чергуємо міста, щоб ліміт заповнювався з усіх, а не лише з першого
+            buckets: dict[int, list[RawBusiness]] = {}
+            for c in candidates:
+                buckets.setdefault(int((c.tags or {}).get("_target", 0)), []).append(c)
+            order = sorted(buckets)
+            mixed: list[RawBusiness] = []
+            j = 0
+            while any(j < len(buckets[k]) for k in order):
+                for k in order:
+                    if j < len(buckets[k]):
+                        mixed.append(buckets[k][j])
+                j += 1
+            candidates = mixed
+
+        if not collected:
             if exclude_chains:
                 chains = detect_chains(candidates)
                 before = len(candidates)
+                excluded = sorted({c.name for c in candidates if c.brand or normalize_name(c.name) in chains})
                 candidates = [c for c in candidates if not c.brand and normalize_name(c.name) not in chains]
                 if before - len(candidates):
-                    sample = ", ".join(sorted({c.name for c in candidates_all if normalize_name(c.name) in chains})[:8])
-                    ctx.log("info", f"Виключено мережевих закладів: {before - len(candidates)}" + (f" (мережі за назвою: {sample})" if sample else ""))
-            ctx.update(candidates=[c.to_dict() for c in candidates], found_count=len(candidates), progress_total=len(candidates))
+                    sample = ", ".join(excluded[:8]) + ("…" if len(excluded) > 8 else "")
+                    ctx.log("info", f"Виключено мережевих закладів: {before - len(candidates)} ({sample})")
+            params["_collected"] = True
+            save_partial(candidates, progress_total=len(candidates), progress_done=0)
             ctx.log("info", f"Знайдено кандидатів: {len(candidates)}")
             if not candidates:
                 ctx.update(status="completed", stage="done", finished_at=_now())
@@ -188,7 +244,9 @@ def _run(job_id: int) -> None:
                 return
 
         processed = set(params.get("_processed") or [])
-        counters: dict[str, int] = {k: getattr(job, k) or 0 for k in ("saved_count", "new_count", "duplicate_count", "skipped_count", "progress_done")}
+        keys = ("saved_count", "new_count", "duplicate_count", "skipped_count", "progress_done")
+        # якщо збір щойно завершився — аналіз починається з нуля; інакше продовжуємо лічильники
+        counters: dict[str, int] = {k: (getattr(job, k) or 0) if collected else 0 for k in keys}
         ctx.update(stage="analyze", progress_total=len(candidates))
         ctx.log("info", "Аналізую цифрову присутність (перевірка сайтів)…" if check_websites else "Аналізую дані (без перевірки сайтів)…")
 

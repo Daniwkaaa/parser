@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Database, SlidersHorizontal, Gauge, Download, Check, RotateCcw, ExternalLink, Map as MapIcon } from "lucide-react";
+import { KeyRound, Database, SlidersHorizontal, Gauge, Download, Check, RotateCcw, ExternalLink, Map as MapIcon, MessageSquareText } from "lucide-react";
 import { api, type MapSettings, type SettingsData } from "../lib/api";
 import { useMeta, useMetaReload } from "../lib/meta";
 import { PageHeader, Spinner, Toggle } from "../components/ui";
@@ -107,6 +107,23 @@ export default function SettingsPage() {
             <button className="btn-primary" onClick={saveScoring} disabled={busy}>{busy && <Spinner />} Зберегти й перерахувати</button>
             <button className="btn-ghost" onClick={async () => { const r = await api.resetScoring(); await load(); setMsg(`Скинуто до стандартних, перераховано ${r.rescored}`); }}><RotateCcw className="h-4 w-4" /> Стандартні</button>
           </div>
+        </section>
+
+        <section className="card card-pad animate-fade-up">
+          <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><MessageSquareText className="h-4 w-4 text-accent-400" /> Готові повідомлення</div><Saved show={saved === "outreach"} /></div>
+          <p className="mb-4 text-xs text-zinc-500">Ці дані підставляються в повідомлення для бізнесів. Усі поля необов'язкові.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {([["sender_name", "Ваше ім'я", "Данило"], ["company", "Компанія / студія", "WebStudio"], ["phone", "Телефон для підпису", "+380…"], ["portfolio", "Посилання на портфоліо", "https://…"]] as const).map(([k, l, ph]) => (
+              <div key={k}><label className="label">{l}</label><input className="input" placeholder={ph} value={(s.outreach as any)[k] || ""} onChange={(e) => setS({ ...s, outreach: { ...s.outreach, [k]: e.target.value } })} /></div>
+            ))}
+          </div>
+          <div className="mt-3 flex gap-4 text-sm text-zinc-300">
+            <span className="text-xs uppercase tracking-wider text-zinc-500">Писати від імені:</span>
+            {([["m", "чоловіка"], ["f", "жінки"]] as const).map(([k, l]) => (
+              <label key={k} className="flex items-center gap-1.5"><input type="radio" name="gender" className="accent-[#7c6cff]" checked={(s.outreach.gender || "m") === k} onChange={() => setS({ ...s, outreach: { ...s.outreach, gender: k } })} />{l}</label>
+            ))}
+          </div>
+          <button className="btn-ghost mt-4" onClick={async () => { await api.saveOutreach(s.outreach as any); flash("outreach"); }}>Зберегти</button>
         </section>
 
         <section className="card card-pad animate-fade-up">

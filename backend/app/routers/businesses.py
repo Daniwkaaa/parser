@@ -8,6 +8,7 @@ from ..analysis.evaluate import valid_phone
 from ..db import get_db
 from ..models import Business, Note, SourceRef
 from ..schemas import BusinessUpdate, NoteCreate, business_brief, business_full
+from ..analysis.outreach import generate as generate_outreach
 from ..services import settings_store
 from ..services.dedup import normalize_address, normalize_name
 from ..services.jobs import db_lock
@@ -88,6 +89,16 @@ def recheck(bid: int, db: Session = Depends(get_db)):
     with db_lock:
         b = recheck_business(db, b, settings_store.get_value(db, "scoring"))
     return business_full(b)
+
+
+@router.get("/{bid}/outreach")
+def outreach(bid: int, variant: int = Query(0, ge=0, le=10000), channel: str = Query("instagram", pattern="^(instagram|email)$"),
+             db: Session = Depends(get_db)):
+    """Готове повідомлення для першого контакту на основі виявлених проблем."""
+    b = db.get(Business, bid)
+    if not b:
+        raise HTTPException(404, "Бізнес не знайдено")
+    return generate_outreach(b, variant, channel, settings_store.get_value(db, "outreach"))
 
 
 @router.post("/{bid}/notes")

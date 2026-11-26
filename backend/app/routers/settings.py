@@ -62,6 +62,16 @@ def put_search(body: dict, db: Session = Depends(get_db)):
         return settings_store.set_value(db, "search", {k: v for k, v in body.items() if k in allowed})
 
 
+@router.put("/settings/outreach")
+def put_outreach(body: dict, db: Session = Depends(get_db)):
+    allowed = set(settings_store.DEFAULTS["outreach"])
+    data = {k: str(v).strip()[:300] for k, v in body.items() if k in allowed}
+    if data.get("gender") not in (None, "m", "f"):
+        raise HTTPException(400, "gender: m або f")
+    with db_lock:
+        return settings_store.set_value(db, "outreach", data)
+
+
 @router.put("/settings/map")
 def put_map(body: dict, db: Session = Depends(get_db)):
     style = body.get("style", "dark")

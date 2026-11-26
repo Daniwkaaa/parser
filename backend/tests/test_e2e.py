@@ -205,3 +205,40 @@ def test_map_settings(client):
     ok = client.put("/api/settings/map", json={"style": "custom", "custom_url": "https://t.example/{z}/{x}/{y}.png"})
     assert ok.status_code == 200 and client.get("/api/meta").json()["map"]["style"] == "custom"
     client.put("/api/settings/map", json={"style": "dark"})
+
+
+def test_oblast_and_country_scope(client):
+    r = client.post("/api/search", json={**SEARCH, "scope": "oblast", "region": "Київська область", "city": None, "limit": 5})
+    assert r.status_code == 200, r.text
+    job = wait_job(client, r.json()["id"])
+    assert job["status"] == "completed", job
+    assert "Київська область" in job["location_label"] and job["saved_count"] <= 5
+    logs = " ".join(l["message"] for l in client.get(f"/api/jobs/{job['id']}/logs").json())
+    assert "Біла Церква" in logs  # перше місто області
+    bad = client.post("/api/search", json={**SEARCH, "scope": "oblast", "region": "Луганська область"})
+    assert bad.status_code == 400  # окупованих регіонів немає у списку
+    job = wait_job(client, client.post("/api/search", json={**SEARCH, "scope": "country", "city": None, "limit": 2}).json()["id"])
+    assert job["status"] == "completed" and "Україна" in job["location_label"]
+    regions = client.get("/api/regions").json()
+    names = {r["name"] for r in regions}
+    assert "Луганська область" not in names and not any("Крим" in n for n in names)
+
+
+def test_outreach_messages(client):
+    items = client.get("/api/businesses?page_size=100").json()["items"]
+    assert items
+    client.put("/api/settings/outreach", json={"sender_name": "Данило", "company": "WebStudio", "gender": "f"})
+    texts = set()
+    for b in items:
+        m = client.get(f"/api/businesses/{b['id']}/outreach?channel=instagram").json()
+        assert "(-" not in m["text"] and m["text"]
+        texts.add(m["text"])
+        if "no_website" not in b["problems"] and "social_only" not in b["problems"]:
+            assert "сайту я" not in m["text"] and "немає сайту" not in m["text"]
+    assert len(texts) == len(items)  # різні бізнеси — різні тексти
+    bid = items[0]["id"]
+    v0 = client.get(f"/api/businesses/{bid}/outreach?variant=0").json()["text"]
+    v1 = client.get(f"/api/businesses/{bid}/outreach?variant=1").json()["text"]
+    assert v0 != v1
+    e = client.get(f"/api/businesses/{bid}/outreach?channel=email").json()
+    assert e["subject"] and "WebStudio" in e["text"]

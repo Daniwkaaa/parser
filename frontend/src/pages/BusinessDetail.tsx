@@ -7,6 +7,7 @@ import { useMeta } from "../lib/meta";
 import { ensureUrl, fmtDate, socialUrl } from "../lib/format";
 import { Empty, ScoreBadge, Spinner, StatusBadge } from "../components/ui";
 import { BaseLayer, tierIcon } from "../components/mapUtils";
+import Outreach from "../components/Outreach";
 
 function Row({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
   return (
@@ -90,6 +91,8 @@ export default function BusinessDetail() {
               </div>
             )}
           </section>
+
+          <Outreach id={b.id} status={b.status} onContacted={async () => setB(await api.updateBusiness(b.id, { status: "contacted" }))} />
 
           <section className="card card-pad">
             <div className="mb-4 text-sm font-medium text-zinc-200">Цифрова присутність</div>

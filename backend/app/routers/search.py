@@ -7,6 +7,7 @@ from ..db import get_db
 from ..models import JobLog, SearchJob
 from ..schemas import GeocodeRequest, SearchRequest
 from ..services.geocode import GeocodeError, resolve_area
+from ..regions import OBLASTS
 from ..services.jobs import cancel_job, db_lock, start_job
 
 router = APIRouter(prefix="/api", tags=["search"])
@@ -26,6 +27,11 @@ def job_dict(j: SearchJob) -> dict:
     }
 
 
+@router.get("/regions")
+def regions():
+    return [{"name": k, "cities": v} for k, v in OBLASTS.items()]
+
+
 @router.post("/geocode")
 def geocode(req: GeocodeRequest, db: Session = Depends(get_db)):
     try:
@@ -38,8 +44,10 @@ def geocode(req: GeocodeRequest, db: Session = Depends(get_db)):
 
 @router.post("/search")
 def create_search(req: SearchRequest, db: Session = Depends(get_db)):
-    if not (req.city or req.region or (req.lat is not None and req.lon is not None)):
+    if req.scope == "city" and not (req.city or req.region or (req.lat is not None and req.lon is not None)):
         raise HTTPException(400, "Вкажіть місто або регіон")
+    if req.scope == "oblast" and req.region not in OBLASTS:
+        raise HTTPException(400, "Оберіть область зі списку")
     with db_lock:
         job = SearchJob(params=req.model_dump(), status="queued", stage="queued")
         db.add(job)
