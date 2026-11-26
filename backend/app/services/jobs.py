@@ -1,0 +1,239 @@
+"""Фонові завдання пошуку: збір, аналіз, збереження з проміжними результатами та відновленням."""
+from __future__ import annotations
+
+import logging
+import threading
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+
+from sqlalchemy import delete
+
+from ..analysis.website import analyze_website
+from ..config import get_settings
+from ..db import SessionLocal
+from ..models import Business, JobLog, JobResult, SearchJob, SourceRef
+from ..sources.base import RawBusiness, SearchArea
+from ..sources.registry import SOURCES
+from . import settings_store
+from .geocode import GeocodeError, resolve_area
+from .processor import finalize, upsert_raw
+
+log = logging.getLogger("leadfinder.jobs")
+db_lock = threading.RLock()
+_cancel: set[int] = set()
+_running: dict[int, threading.Thread] = {}
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+class JobContext:
+    def __init__(self, job_id: int):
+        self.job_id = job_id
+
+    def log(self, level: str, message: str) -> None:
+        getattr(log, "warning" if level == "warning" else ("error" if level == "error" else "info"))(f"[job {self.job_id}] {message}")
+        with db_lock:
+            db = SessionLocal()
+            try:
+                db.add(JobLog(job_id=self.job_id, level=level, message=message[:2000]))
+                db.commit()
+            finally:
+                db.close()
+
+    def update(self, **fields) -> None:
+        with db_lock:
+            db = SessionLocal()
+            try:
+                job = db.get(SearchJob, self.job_id)
+                for k, v in fields.items():
+                    setattr(job, k, v)
+                db.commit()
+            finally:
+                db.close()
+
+    @property
+    def cancelled(self) -> bool:
+        return self.job_id in _cancel
+
+
+def start_job(job_id: int) -> None:
+    if job_id in _running and _running[job_id].is_alive():
+        return
+    _cancel.discard(job_id)
+    t = threading.Thread(target=_run, args=(job_id,), daemon=True, name=f"job-{job_id}")
+    _running[job_id] = t
+    t.start()
+
+
+def cancel_job(job_id: int) -> None:
+    _cancel.add(job_id)
+
+
+def recover_interrupted() -> None:
+    """При запуску: завдання, що виконувалися під час зупинки програми, позначаємо як перервані."""
+    db = SessionLocal()
+    try:
+        for job in db.query(SearchJob).filter(SearchJob.status.in_(["running", "queued"])).all():
+            job.status = "interrupted"
+            job.error = "Програму було зупинено під час виконання. Можна продовжити з місця зупинки."
+            db.add(JobLog(job_id=job.id, level="warning", message="Завдання перервано зупинкою програми"))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _matches(problems: list[str], wanted: list[str]) -> bool:
+    if not wanted:
+        return True
+    return any(p in problems for p in wanted)
+
+
+def _run(job_id: int) -> None:
+    ctx = JobContext(job_id)
+    db = SessionLocal()
+    try:
+        job = db.get(SearchJob, job_id)
+        params = dict(job.params or {})
+        resuming = bool(job.candidates)
+        ctx.update(status="running", stage="geocode", started_at=job.started_at or _now(), error=None, finished_at=None)
+        ctx.log("info", "Продовжую перерване завдання" if resuming else "Завдання запущено")
+
+        scoring = settings_store.get_value(db, "scoring")
+        limit = int(params.get("limit") or 100)
+        wanted = [] if params.get("comprehensive") else list(params.get("problems") or [])
+        check_websites = bool(params.get("check_websites", True))
+        exclude_chains = bool(params.get("exclude_chains", True))
+
+        # 1. Територія
+        if params.get("_area"):
+            area = SearchArea.from_dict(params["_area"])
+        else:
+            ctx.log("info", "Визначаю територію пошуку через Nominatim…")
+            with db_lock:
+                area = resolve_area(db, country=params.get("country"), region=params.get("region"), city=params.get("city"),
+                                    district=params.get("district"), radius_km=params.get("radius_km"),
+                                    lat=params.get("lat"), lon=params.get("lon"))
+            params["_area"] = area.to_dict()
+            ctx.update(params=params, location_label=area.label)
+            ctx.log("info", f"Територія: {area.label}")
+        region_code = area.country_code or "UA"
+
+        # 2. Збір кандидатів (зберігається як проміжний результат)
+        if resuming:
+            candidates = [RawBusiness.from_dict(c) for c in job.candidates]
+            ctx.log("info", f"Використовую збережені проміжні результати: {len(candidates)} кандидатів")
+        else:
+            ctx.update(stage="collect")
+            candidates = []
+            for src_key in params.get("sources") or ["osm"]:
+                cls = SOURCES.get(src_key)
+                if not cls:
+                    continue
+                api_key = settings_store.get_api_key(db, src_key) if cls.requires_key else None
+                src = cls(api_key=api_key)
+                if not src.is_available():
+                    ctx.log("warning", f"{cls.label}: не задано API-ключ, джерело пропущено")
+                    continue
+                ctx.log("info", f"Збираю дані з джерела: {cls.label}")
+                try:
+                    found = src.search(area, params.get("categories") or [], limit, ctx.log)
+                except Exception as e:  # помилка одного джерела не зупиняє інші
+                    ctx.log("error", f"{cls.label}: помилка — {e}")
+                    continue
+                candidates.extend(found)
+                if ctx.cancelled:
+                    break
+            if exclude_chains:
+                before = len(candidates)
+                candidates = [c for c in candidates if not c.brand]
+                if before - len(candidates):
+                    ctx.log("info", f"Виключено мережевих брендів: {before - len(candidates)}")
+            ctx.update(candidates=[c.to_dict() for c in candidates], found_count=len(candidates), progress_total=len(candidates))
+            ctx.log("info", f"Знайдено кандидатів: {len(candidates)}")
+            if not candidates:
+                ctx.update(status="completed", stage="done", finished_at=_now())
+                ctx.log("warning", "Нічого не знайдено. Спробуйте збільшити радіус або обрати інші категорії.")
+                return
+
+        processed = set(params.get("_processed") or [])
+        counters = {k: getattr(job, k) or 0 for k in ("saved_count", "new_count", "duplicate_count", "skipped_count", "progress_done")}
+        ctx.update(stage="analyze", progress_total=len(candidates))
+        ctx.log("info", "Аналізую цифрову присутність (перевірка сайтів)…" if check_websites else "Аналізую дані (без перевірки сайтів)…")
+
+        pending = [c for c in candidates if f"{c.source}:{c.source_id}" not in processed]
+
+        def handle(raw: RawBusiness):
+            if ctx.cancelled:
+                return None
+            with db_lock:
+                if counters["saved_count"] >= limit:
+                    return None
+                s = SessionLocal()
+                try:
+                    biz, is_new, reason, url = upsert_raw(s, raw, check_website=check_websites, region_code=region_code)
+                    biz_id = biz.id
+                finally:
+                    s.close()
+            wa = analyze_website(url) if url else None  # мережевий запит — поза блокуванням
+            with db_lock:
+                s = SessionLocal()
+                try:
+                    biz = s.get(Business, biz_id)
+                    finalize(s, biz, wa, scoring, region_code)
+                    matched = _matches(biz.problems or [], wanted)
+                    key = f"{raw.source}:{raw.source_id}"
+                    processed.add(key)
+                    counters["progress_done"] += 1
+                    if not is_new:
+                        counters["duplicate_count"] += 1
+                    if matched and counters["saved_count"] < limit:
+                        counters["saved_count"] += 1
+                        if is_new:
+                            counters["new_count"] += 1
+                        if not s.query(JobResult).filter_by(job_id=job_id, business_id=biz_id).first():
+                            s.add(JobResult(job_id=job_id, business_id=biz_id, is_new=is_new))
+                        s.commit()
+                        status = "новий" if is_new else f"дубль ({reason}) — дані об'єднано"
+                        ctx.log("info", f"✓ {biz.name}: {biz.lead_score} балів, {status}")
+                    else:
+                        counters["skipped_count"] += 1
+                        if is_new and not matched:
+                            s.execute(delete(SourceRef).where(SourceRef.business_id == biz_id))
+                            s.delete(biz)
+                            s.commit()
+                    p = dict(params)
+                    p["_processed"] = list(processed)
+                    ctx.update(params=p, **counters)
+                finally:
+                    s.close()
+            return True
+
+        workers = max(1, int(get_settings().website_check_concurrency)) if check_websites else 1
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(handle, c) for c in pending]
+            for f in as_completed(futures):
+                try:
+                    f.result()
+                except Exception as e:
+                    ctx.log("error", f"Помилка обробки запису: {e}")
+                    log.debug(traceback.format_exc())
+
+        if ctx.cancelled:
+            ctx.update(status="cancelled", stage="cancelled", finished_at=_now())
+            ctx.log("warning", "Завдання зупинено користувачем")
+        else:
+            ctx.update(status="completed", stage="done", finished_at=_now())
+            ctx.log("info", f"Готово: збережено {counters['saved_count']} (нових {counters['new_count']}, дублікатів {counters['duplicate_count']}, не відповідали фільтрам {counters['skipped_count']})")
+    except GeocodeError as e:
+        ctx.update(status="failed", stage="failed", error=str(e), finished_at=_now())
+        ctx.log("error", str(e))
+    except Exception as e:
+        log.exception("job %s failed", job_id)
+        ctx.update(status="failed", stage="failed", error=str(e), finished_at=_now())
+        ctx.log("error", f"Помилка: {e}. Збережені результати не втрачено, завдання можна продовжити.")
+    finally:
+        db.close()
+        _cancel.discard(job_id)

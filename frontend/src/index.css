@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+html, body, #root { height: 100%; }
+body {
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(124,108,255,0.08), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(56,99,255,0.06), transparent 60%),
+    #08090c;
+  font-feature-settings: "cv11", "ss01";
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #2b303b; border-radius: 8px; border: 2px solid #0d0f14; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@layer components {
+  .card { @apply rounded-2xl border border-white/[0.06] bg-ink-900/80 backdrop-blur-sm; }
+  .card-pad { @apply p-5; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-primary { @apply btn bg-accent-500 text-white hover:bg-accent-600 shadow-glow; }
+  .btn-ghost { @apply btn border border-white/10 bg-white/[0.03] text-zinc-200 hover:bg-white/[0.07] hover:border-white/20; }
+  .btn-danger { @apply btn border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20; }
+  .input { @apply w-full rounded-xl border border-white/10 bg-ink-850 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none transition focus:border-accent-500/70 focus:ring-2 focus:ring-accent-500/20; }
+  .label { @apply mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .chip { @apply inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition; }
+  .chip-off { @apply chip border-white/10 bg-white/[0.02] text-zinc-400 hover:border-white/25 hover:text-zinc-200; }
+  .chip-on { @apply chip border-accent-500/60 bg-accent-soft text-accent-400; }
+  .th { @apply px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-500; }
+  .td { @apply px-3 py-3 text-sm; }
+}
+
+.leaflet-container { background: #0d0f14; font-family: Inter, sans-serif; border-radius: 1rem; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #171a21; color: #e4e4e7; border: 1px solid rgba(255,255,255,.08); }
+.leaflet-control-attribution { background: rgba(13,15,20,.8) !important; color: #71717a !important; }
+.leaflet-control-attribution a { color: #9b8fff !important; }
+.leaflet-bar a { background: #171a21 !important; color: #e4e4e7 !important; border-color: #2b303b !important; }
